@@ -1,0 +1,143 @@
+<?php
+
+// $Id$
+/**
+ * @file readonly_field.module
+ * Allows node's title, taxonomy terms, or CCK fields to be set as
+ * read-only when editing.
+ *
+ * @author Kevin Bond (kevinbond@gmail.com)
+ */
+// permission definitions
+define('READONLY_FIELD_PERM_ADMIN', 'designate fields as read-only');
+
+// variable table prefix
+define('READONLY_FIELD_VAR_PREFIX', 'readonly_field_fields_');
+
+/**
+ * Implementation of hook_help().
+ */
+function readonly_field_help($path, $arg) {
+  switch ($path) {
+    case 'admin/help#readonly_field':
+      return t('<p>' . t('The Read-only field module allows administators to designate node fields to be read-only when editing a node.  This is useful for fields that you do not want changed after node creation.') . '</p>');
+  }
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function readonly_field_perm() {
+  return array(READONLY_FIELD_PERM_ADMIN);
+}
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function readonly_field_form_alter(&$form, $form_state, $form_id) {
+  // check if editing a node form
+  if (isset($form['type']) && isset($form['#node'])) {
+    // check if editing node - we only want read-only on edit
+    if ($form['nid']['#value']) {      
+      $form['#after_build'][] = '_readonly_after_build';
+    }
+  }
+}
+
+/**
+ * Custom after_build callback handler.
+ */
+function _readonly_after_build($form, &$form_state) {
+
+  $readonly_settings = variable_get(READONLY_FIELD_VAR_PREFIX . $form['type']['#value'], 0);
+
+  // modify form if settings defined
+  if (is_array($readonly_settings)) {
+    // loop through all fields
+    foreach ($readonly_settings as $field) {
+      switch ($field) {
+        case 'title':
+          $form['title']['#attributes']['disabled'] = 'disabled';
+          break;
+
+        default:
+          _readonly_fix_disabled($form[$field]);
+
+          break;
+      }
+    }
+  }  
+  return $form;
+}
+
+/**
+ * Recursively set the disabled attribute of a CCK field
+ * and all its dependent FAPI elements.
+ *
+ * @see http://drupal.org/node/357328
+ */
+function _readonly_fix_disabled(&$elements) {
+  foreach (element_children($elements) as $key) {
+    if (isset($elements[$key]) && $elements[$key]) {
+
+      // Recurse through all children elements.
+      _readonly_fix_disabled($elements[$key]);
+    }
+  }
+
+  if (!isset($elements['#attributes'])) {
+    $elements['#attributes'] = array();
+  }
+  $elements['#attributes']['disabled'] = 'disabled';
+}
+
+/**
+ * Implementation of hook_form_FORM_ID_alter().
+ */
+function readonly_field_form_node_type_form_alter(&$form, &$form_state) {
+  if (user_access(READONLY_FIELD_PERM_ADMIN) && isset($form['#node_type'])) {
+    _readonly_field_node_settings_form($form);
+  }
+}
+
+/**
+ * Add the read-only field settings form to content type forms (node_type_form).
+ */
+function _readonly_field_node_settings_form(&$form) {
+  $node_type = $form['#node_type'];
+  
+  $fields = array();
+
+  if ($node_type->has_title)
+    $fields['title'] = $node_type->title_label . ' (title)';
+
+  if ($node_type->has_body)
+    $fields['body_field'] = $node_type->body_label . ' (body_field)';
+
+  // load cck fields
+  if (module_exists('content') && !empty($node_type->type)) {
+    $content_types = content_types($node_type->type);
+
+    if (is_array($content_types) && is_array($content_types['fields'])) {
+      foreach ($content_types['fields'] as $field => $info) {
+        $fields[$field] = $info['widget']['label'] . ' (' . $field . ')';
+      }
+    }
+  }
+
+  // build the form
+  $form['readonly_field'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Read-only field settings'),
+      '#weight' => 1,
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+  );
+  $form['readonly_field']['readonly_field_fields'] = array(
+      '#type' => 'checkboxes',
+      '#title' => t('Choose the fields that should be read-only'),
+      '#options' => $fields,
+      '#default_value' => variable_get(READONLY_FIELD_VAR_PREFIX . $node_type->type, array()),
+      '#description' => t('After designating that certain fields should be read-only, users will not be able to edit their values after node creation.'),
+  );
+}

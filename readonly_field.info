@@ -1,0 +1,4 @@
+; $Id$
+name = Read-only Field
+description = Allows node's title, taxonomy terms, or CCK fields to be set as read-only when editing.
+core = 6.x
